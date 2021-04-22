@@ -53,11 +53,14 @@ pixels = neopixel.NeoPixel(board.D21, MAXPIX, brightness=1.0, auto_write=False)
 
 app = Flask(__name__)
 
-# 0 - teacher
-# 1 - mod
-# 2 - student
-# 3 - anyone
-# 4 - banned
+groups = {
+    'teacher': 0,
+    'mod': 1,
+    'student': 2,
+    'anyone': 3,
+    'banned': 4
+}
+
 settingsPerms = {
     'admin' : 0,
     'users' : 1,
@@ -88,7 +91,7 @@ settingsStrDict = {
 }
 
 settingsStrList = {
-    'modes': ['thumbs', 'survey', 'quiz', 'essay', 'help', 'kahoot', 'playtime', 'blockchest']
+    'modes': ['thumbs', 'survey', 'quiz', 'essay', 'progress', 'playtime']
 }
 
 whiteList = [
@@ -101,9 +104,19 @@ banList = []
 studentList = {
 }
 
+lessonData = {}
+
+sessionData = {
+    'wawdLink': '/',
+    'agendaStep': 0,
+    'currentEssay': 0,
+    'currentProgress': 0,
+    'currentQuiz': 0,
+    'stepResults': []
+}
+
 settingsIntDict['numStudents'] = 8
 up = down = wiggle = 0
-ipList = {}
 helpList = {}
 blockList = []
 colorDict = {
@@ -145,7 +158,10 @@ def newStudent(remote, username, forward='', pin=''):
             'name': username,
             'thumb': '',
             'survey': '',
-            'perms': 2,
+            'essays': [],
+            'quizzes': [],
+            'progress': [],
+            'perms': 2
         }
         if len(studentList) - 1:
             logging.info("New user logged in. Made them a student: " + username)
@@ -269,9 +285,9 @@ def surveyBar():
     results = [] # Create empty results list
     clearBar()
     #Go through IP list and see what each IP sent as a response
-    for x in ipList:
+    for x in studentList:
         #add this result to the results list
-        results.append(ipList[x])
+        results.append(studentList[x])
     #The number of results is how many have completed the survey
     complete = len(results)
     #calculate the chunk length for each student
@@ -406,6 +422,10 @@ def autoStudentCount():
 def endpoint_home():
     return render_template('index.html')
 
+@app.route('/wawd')
+def endpoint_wawd():
+    return redirect(sessionData['wawdLink'])
+
 @app.route('/login', methods = ['POST', 'GET'])
 def endpoint_login():
     remote = request.remote_addr
@@ -454,7 +474,7 @@ def endpoint_color():
         elif r and b and g:
             fillBar((r, g, b))
         else:
-            return "Bad ArgumentsTry <b>/color?hex=#FF00FF</b> or <b>/color?r=255&g=0&b=255</b>"
+            return "Bad ArgumentsTry <b>/color?hex=FF00FF</b> or <b>/color?r=255&g=0&b=255</b>"
         pixels.show()
         return render_template("message.html", message = "Color sent!" )
 
@@ -476,19 +496,19 @@ def endpoint_segment():
         start = request.args.get('start')
         end = request.args.get('end')
         if not hex:
-            return "Bad ArgumentsTry <b>/segment?start=0&end=10&hex=#FF00FF</b> (you need at least one color)"
+            return "Bad ArgumentsTry <b>/segment?start=0&end=10&hex=FF00FF</b> (you need at least one color)"
         if not hex2dec(hex):
-            return "Bad ArgumentsTry <b>/segment?start=0&end=10&hex=#FF00FF</b> (you did not use a proper hexadecimal color)"
+            return "Bad ArgumentsTry <b>/segment?start=0&end=10&hex=FF00FF</b> (you did not use a proper hexadecimal color)"
         if not start or not end:
-            return "Bad ArgumentsTry <b>/segment?start=0&end=10&hex=#FF00FF</b> (you need a start and end point)"
+            return "Bad ArgumentsTry <b>/segment?start=0&end=10&hex=FF00FF</b> (you need a start and end point)"
         else:
             try:
                 start = int(start)
                 end = int(end)
             except:
-                return "Bad ArgumentsTry <b>/segment?start=0&end=10&hex=#FF00FF</b> (start and end must be and integer)"
+                return "Bad ArgumentsTry <b>/segment?start=0&end=10&hex=FF00FF</b> (start and end must be and integer)"
         if start > BARPIX or end > BARPIX:
-            return "Bad ArgumentsTry <b>/segment?start=0&end=10&hex=#FF00FF</b> (Your start or end was higher than the number of pixels: " + str(BARPIX) + ")"
+            return "Bad ArgumentsTry <b>/segment?start=0&end=10&hex=FF00FF</b> (Your start or end was higher than the number of pixels: " + str(BARPIX) + ")"
         pixRange = range(start, end)
         if type == 'fadein':
             for i, pix in enumerate(pixRange):
@@ -498,9 +518,9 @@ def endpoint_segment():
                 pixels[pix] = fadeout(pixRange, i, hex2dec(hex))
         elif type == 'blend':
             if not hex:
-                return "Bad ArgumentsTry <b>/segment?start=0&end=10&hex=#FF00FF&hex2=#00FF00</b> (you need at least two colors)"
+                return "Bad ArgumentsTry <b>/segment?start=0&end=10&hex=FF00FF&hex2=00FF00</b> (you need at least two colors)"
             if not hex2dec(hex):
-                return "Bad ArgumentsTry <b>/segment?start=0&end=10&hex=#FF00FF&hex2=#00FF00</b> (you did not use a proper hexadecimal color)"
+                return "Bad ArgumentsTry <b>/segment?start=0&end=10&hex=FF00FF&hex2=00FF00</b> (you did not use a proper hexadecimal color)"
             else:
                 for i, pix in enumerate(pixRange):
                     pixels[pix] = blend(pixRange, i, hex2dec(hex), hex2dec(hex2))
@@ -511,14 +531,68 @@ def endpoint_segment():
             if hex2dec(hex):
                 fillBar(hex2dec(hex))
             else:
-                return "Bad ArgumentsTry <b>/color?hex=#FF00FF</b> or <b>/color?r=255&g=0&b=255</b>"
+                return "Bad ArgumentsTry <b>/color?hex=FF00FF</b> or <b>/color?r=255&g=0&b=255</b>"
         pixels.show()
         return render_template("message.html", message = "Color sent!" )
 
+
+@app.route('/loadlesson')
+def endpoint_loadlesson():
+    global lessonData
+    lessonData = lessons.readFolder()[0]
+    for student in studentList:
+        for i, prog in enumerate(lessonData['progressList']):
+            newProg = []
+            for j in range(len(lessonData['progressList'][i]['task'])):
+                newProg.append(False)
+            studentList[student]['progress'].append(newProg)
+    print(studentList)
+    return render_template("message.html", message = "Lesson loaded for all students.")
+
+
+@app.route('/progress')
+def endpoint_progress():
+    if not request.remote_addr in studentList:
+        # This will have to send along the current address as "forward" eventually
+        return redirect('/login')
+    if studentList[request.remote_addr]['perms'] > groups['student']:
+        return render_template("message.html", message = "You do not have high enough permissions to do this right now. " )
+    elif studentList[request.remote_addr]['perms'] == groups['teacher']:
+        print(lessonData)
+        resString = '<ul>'
+        #Show current progress total bar of students combined
+        #Show each student and current progress
+        for student in studentList:
+            resString += '<li>' + studentList[student]['name'] + '</li><ul><li>'
+            for i, prog in enumerate(studentList[student]['progress'][sessionData['currentProgress']]):
+                resString += str(studentList[student]['progress'][sessionData['currentProgress']][i])
+                if i < len(studentList[student]['progress'][sessionData['currentProgress']]) - 1:
+                    resString += ', '
+            resString += '</ul>'
+        resString += '</ul>'
+        #Click on student to show all progresses (clientside)
+        return render_template("general.html", content=resString)
+    else:
+        if request.args.get('progindex'):
+            progIndex = request.args.get('progindex')
+            checkIndex = request.args.get('checkindex')
+            checkVal = request.args.get('checkval')
+            if checkIndex and checkVal:
+
+                pass
+            else:
+                if len(lessonData[sessionData['currentProgress']]['progressList']):
+                    resString = '<ul>'
+                    for i, task in enumerate(lessonData[0]['progressList'][0]['task']):
+                        resString += '<li><input type="checkbox"> ' + task
+                        resString += '<ul><li>' + lessonData[0]['progressList'][0]['desc'][i] + '</li></ul></li>'
+                    resString += '</ul>'
+                    return render_template("general.html", content=resString)
+                else:
+                    return render_template('message.html', message="There was an error?")
+
 @app.route('/settings', methods = ['POST', 'GET'])
 def settings():
-    global ipList
-
     if not request.remote_addr in studentList:
         # This will have to send along the current address as "forward" eventually
         return redirect('/login')
@@ -530,16 +604,17 @@ def settings():
     if studentList[request.remote_addr]['perms'] > settingsPerms['bar']:
         return render_template("message.html", message = "You do not have high enough permissions to do this right now. " )
     else:
-        ipList = {}
-        for student in studentList:
-            studentList[student]['thumb'] = ''
         if request.method == 'POST':
             # quizQuestion = request.form['qQuestion']
             # quizCorrect = int(request.form['quizlet'])
             # quizAnswers = [request.form['qaAnswer'], request.form['qbAnswer'], request.form['qcAnswer'], request.form['qdAnswer']]
             if settingsStrDict['mode'] == 'thumbs':
+                for student in studentList:
+                    studentList[student]['thumb'] = ''
                 tutdBar()
             elif settingsStrDict['mode'] == 'survey':
+                for student in studentList:
+                    studentList[student]['survey'] = ''
                 surveyBar()
             playSFX("sfx_success01")
             settingsBoolDict['paused'] = False
@@ -582,7 +657,6 @@ def settings():
                 resString += 'Set <i>numStudents</i> to: ' + str(settingsIntDict['numStudents'])
             if request.args.get('mode'):
                 if request.args.get('mode') in settingsStrList['modes']:
-                    ipList = {}
                     settingsStrDict['mode'] = request.args.get('mode')
                     resString += 'Set <i>mode</i> to: ' + settingsStrDict['mode']
                 else:
@@ -624,18 +698,18 @@ def endpoint_quiz():
         answer = request.args.get('answer')
         if answer:
             answer = int(answer)
-            if request.remote_addr not in ipList:
+            if request.remote_addr not in studentList:
                 if answer == quizCorrect:
-                    ipList[request.remote_addr] = 'up'
+                    studentList[request.remote_addr]['thumbs'] = 'up'
                 else:
-                    ipList[request.remote_addr] = 'down'
+                    studentList[request.remote_addr]['thumbs'] = 'down'
                 tutdBar()
                 return render_template("message.html", message = "Thank you for your tasty bytes..." )
             else:
                 return render_template("message.html", message = "You have already answered this quiz." )
         else:
             resString = '<meta http-equiv="refresh" content="5">'
-            if request.remote_addr in ipList:
+            if request.remote_addr in studentList:
                 resString += '<b><i>You have already answered this question. Wait for a new one</b></i>'
             resString += '<table border=1><tr><td>' + quizQuestion + '</td></tr>'
             for i, question in enumerate(quizAnswers):
@@ -670,11 +744,11 @@ def endpoint_survey():
             #return render_template("message.html", message = "There is no survey right now" )
         if vote:
             if vote in ["a", "b", "c", "d"]:
-                ipList[request.remote_addr] = vote
+                studentList[request.remote_addr]['survey'] = vote
                 surveyBar()
                 return render_template("message.html", message = "Thank you for your tasty bytes... (" + vote + ")" )
             elif vote == 'oops':
-                ipList.pop(ip)
+                sstudentList[request.remote_addr]['survey'] = ''
                 surveyBar()
                 return render_template("message.html", message = "I won\'t mention it if you don\'t" )
             else:

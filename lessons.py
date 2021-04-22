@@ -15,15 +15,16 @@ def readFolder():
 def readBook(book):
     # newLesson = newBook.parse('Quiz_1').to_dict()
     lessonData = {
-        'bellringer': {},
-        'exitticket': {},
+        'agenda': [],
+        'objective': [],
+        'resources': [],
         'progressList': [],
         'quizList': []
     }
     for sheet in book.sheet_names:
         if sheet[0:5] == 'Quiz_':
             lesson = book.parse(sheet).to_dict()
-            quiz = {'questions':[], 'keys': [], 'answers': []}
+            quiz = {'name': sheet[5:], 'questions':[], 'keys': [], 'answers': []}
             for row in range(0, len(lesson['Question'])):
                 answers = []
                 for i, col in enumerate(lesson):
@@ -35,6 +36,14 @@ def readBook(book):
                         answers.append(lesson[col][row])
                 quiz['answers'].append(answers)
             lessonData['quizList'].append(quiz)
+        elif sheet[0:9] == 'Progress_':
+            lesson = book.parse(sheet).to_dict()
+            progress = {'name': sheet[9:], 'task':[], 'desc': []}
+            for task in lesson['Task']:
+                progress['task'].append(lesson['Task'][task])
+            for desc in lesson['Description']:
+                progress['desc'].append(lesson['Description'][desc])
+            lessonData['progressList'].append(progress)
     return lessonData
 
 # def consoleQuiz():
@@ -48,5 +57,3 @@ def readBook(book):
 #                 print('Correct!')
 #             else:
 #                 print('haha dumb!')
-
-print(readFolder())
